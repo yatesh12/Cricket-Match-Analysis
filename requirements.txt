@@ -1,0 +1,45 @@
+# CricketIQ - Enterprise Cricket Analytics Platform
+# Core data stack
+pandas>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Machine learning
+scikit-learn>=1.2.0
+xgboost>=1.7.0
+lightgbm>=4.0.0
+
+# Deep learning
+torch>=2.0.0
+
+# Survival analysis (Module 4)
+lifelines>=0.27.0
+lifetimes>=0.11.0
+
+# Dimensionality reduction & visualization
+umap-learn>=0.5.0
+plotly>=5.14.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# NLP / search validation (Module 3)
+pytrends>=4.9.0
+
+# App layer
+streamlit>=1.25.0
+fastapi>=0.95.0
+uvicorn>=0.21.0
+pydantic>=2.0.0
+
+# PDF generation (Module 3)
+reportlab>=4.0.0
+
+# Synthetic data (Module 4)
+faker>=18.0.0
+
+# Utilities
+shap>=0.41.0
+joblib>=1.2.0
+tqdm>=4.65.0
+requests>=2.28.0
+python-multipart>=0.0.6
