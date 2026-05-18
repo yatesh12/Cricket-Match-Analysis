@@ -79,7 +79,7 @@ def aggregate_over_stats(ball_by_ball: pd.DataFrame) -> pd.DataFrame:
     if "is_wicket" not in df.columns:
         df["is_wicket"] = False
 
-    df["legal_delivery"] = ~(df["is_wide"] | df["is_noball"])
+    df["legal_delivery"] = (~df["is_wide"].fillna(0).astype(bool) & ~df["is_noball"].fillna(0).astype(bool))
 
     over_stats = df.groupby(
         ["match_id", "innings", "batting_team", "over"]
@@ -108,11 +108,20 @@ def aggregate_over_stats(ball_by_ball: pd.DataFrame) -> pd.DataFrame:
 def compute_match_context(over_stats: pd.DataFrame) -> pd.DataFrame:
     """Add contextual columns: RRR, overs remaining, target, etc."""
     df = over_stats.copy()
-    match_targets = df[df["innings"] == 1].groupby("match_id")["runs_scored"].sum().reset_index()
-    match_targets.columns = ["match_id", "inning1_total"]
+    if df.empty:
+        return df
 
-    df = df.merge(match_targets, on="match_id", how="left")
-    df["target"] = df["inning1_total"] + 1
+    if "inning1_total" not in df.columns:
+        match_targets = df[df["innings"] == 1].groupby("match_id")["runs_scored"].sum().reset_index()
+        if match_targets.empty:
+            match_targets = pd.DataFrame({"match_id": df["match_id"].unique(), "inning1_total": 0})
+        else:
+            match_targets.columns = ["match_id", "inning1_total"]
+        df = df.merge(match_targets, on="match_id", how="left")
+    elif "target" not in df.columns:
+        pass  # already computed
+
+    df["target"] = df["inning1_total"].fillna(0).astype(int) + 1
     df["overs_remaining"] = 20 - df["over"]
 
     is_chase = df["innings"] == 2
@@ -159,7 +168,7 @@ def derive_pressure_features(ball_by_ball: pd.DataFrame) -> pd.DataFrame:
     if "is_wicket" not in df.columns:
         df["is_wicket"] = False
 
-    df["legal_delivery"] = ~(df["is_wide"] | df["is_noball"])
+    df["legal_delivery"] = (~df["is_wide"].fillna(0).astype(bool) & ~df["is_noball"].fillna(0).astype(bool))
     df["is_boundary"] = (df["runs"] >= 4) & ~df["is_wide"]
     df["is_dot"] = (df["runs"] == 0) & df["legal_delivery"]
 
@@ -362,10 +371,11 @@ class CricketDataLoader:
             "striker": "batter",
             "runs_off_bat": "runs",
         })
-        df["over"] = df["ball"].str.split(".").str[0].astype(int)
-        df["ball_in_over"] = df["ball"].str.split(".").str[1].astype(int)
-        df["is_wide"] = df["wides"].fillna(0).astype(int)
-        df["is_noball"] = df["noballs"].fillna(0).astype(int)
+        ball_str = df["ball"].astype(str)
+        df["over"] = ball_str.str.split(".").str[0].astype(int)
+        df["ball_in_over"] = ball_str.str.split(".").str[1].astype(int)
+        df["is_wide"] = (df["wides"].fillna(0).astype(int) > 0).astype(int)
+        df["is_noball"] = (df["noballs"].fillna(0).astype(int) > 0).astype(int)
         df["is_wicket"] = (df["wicket_type"].notna() & (df["wicket_type"] != "")).astype(int)
         df["runs"] = df["runs"].fillna(0).astype(int)
         df["match_type"] = "T20"
@@ -383,19 +393,31 @@ class CricketDataLoader:
         """Standardise enriched 57-col CSV to internal format."""
         df = df.rename(columns={
             "striker": "batter",
-            "runs_off_bat": "runs",
             "date": "start_date",
         })
         if "over" not in df.columns:
-            df["over"] = df.get("ball", "").str.split(".").str[0].fillna(0).astype(int)
-        df["ball_in_over"] = df.get("ball", df["over"].astype(str) + ".1").str.split(".").str[1].fillna(1).astype(int)
-        df["is_wide"] = df["wides"].fillna(0).astype(int) if "wides" in df.columns else 0
-        df["is_noball"] = df["noballs"].fillna(0).astype(int) if "noballs" in df.columns else 0
+            ball_series = df["ball"].astype(str)
+            df["over"] = ball_series.str.split(".").str[0].fillna("0").astype(int)
+        else:
+            df["over"] = df["over"].fillna(0).astype(int)
+        def _parse_ball(over, ball):
+            if ball and str(ball) != "nan":
+                b = str(ball)
+                if "." in b:
+                    return int(b.split(".")[-1])
+                return int(b)
+            return 1
+        df["ball_in_over"] = df.apply(
+            lambda r: int(_parse_ball(r.get("over", 0), r.get("ball", 1))),
+            axis=1,
+        )
+        df["is_wide"] = (df["wides"].fillna(0).astype(int) > 0).astype(int) if "wides" in df.columns else 0
+        df["is_noball"] = (df["noballs"].fillna(0).astype(int) > 0).astype(int) if "noballs" in df.columns else 0
         if "is_wicket" in df.columns:
             df["is_wicket"] = df["is_wicket"].fillna(0).astype(int)
         else:
             df["is_wicket"] = (df["wicket_type"].notna() & (df["wicket_type"] != "")).astype(int)
-        df["runs"] = df["runs"].fillna(0).astype(int)
+        df["runs"] = df["runs_off_bat"].fillna(0).astype(int)
         if "match_type" not in df.columns:
             df["match_type"] = "T20"
         if "city" not in df.columns:
@@ -407,8 +429,6 @@ class CricketDataLoader:
         for col in ["toss_winner", "toss_decision", "target"]:
             if col not in df.columns:
                 df[col] = ""
-            elif col == "target" and col not in df.columns:
-                df[col] = df.get("inning1_total", 0)
         return df
 
     @staticmethod
@@ -421,9 +441,10 @@ class CricketDataLoader:
             "venue_x": "venue",
         })
         df["innings"] = df["innings"].astype(int)
-        df["over"] = df["over"].astype(int)
+        if "over" in df.columns and df["over"].dtype.kind in ("f", "i"):
+            df["over"] = df["over"].fillna(0).astype(int)
         df["ball_in_over"] = 1
-        df["is_wide"] = df["wide"].fillna(0).astype(int) if "wide" in df.columns else 0
+        df["is_wide"] = (df["wide"].fillna(0).astype(int) > 0).astype(int) if "wide" in df.columns else 0
         df["is_noball"] = df["noballs"].fillna(0).astype(int) if "noballs" in df.columns else 0
         df["is_wicket"] = (df["wicket_type"].notna() & (df["wicket_type"] != "")).astype(int)
         df["runs"] = df["runs"].fillna(0).astype(int)
@@ -444,10 +465,11 @@ class CricketDataLoader:
             "runs_off_bat": "runs",
         })
         df["innings"] = df["innings"].astype(int)
-        df["over"] = df["over"].astype(int)
+        if "over" in df.columns and df["over"].dtype.kind in ("f", "i"):
+            df["over"] = df["over"].fillna(0).astype(int)
         df["ball_in_over"] = df["ball"].fillna(1).astype(int) if "ball" in df.columns else 1
-        df["is_wide"] = df["wides"].fillna(0).astype(int) if "wides" in df.columns else 0
-        df["is_noball"] = df["noballs"].fillna(0).astype(int) if "noballs" in df.columns else 0
+        df["is_wide"] = (df["wides"].fillna(0).astype(int) > 0).astype(int) if "wides" in df.columns else 0
+        df["is_noball"] = (df["noballs"].fillna(0).astype(int) > 0).astype(int) if "noballs" in df.columns else 0
         if "is_wicket" in df.columns:
             df["is_wicket"] = df["is_wicket"].fillna(0).astype(int)
         else:

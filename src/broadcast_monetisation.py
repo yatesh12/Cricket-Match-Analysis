@@ -609,8 +609,9 @@ class BroadcastMonetisation:
         # 4. Train LSTM
         self.lstm.fit(revenue_mapped)
 
-        # 5. Detect peak windows (using actual excitement)
-        detected = self.detector.detect(revenue_mapped)
+        # 5. Detect peak windows (fallback to actual excitement if LSTM not fitted)
+        pred_col = "predicted_excitement_t+1" if self.lstm._fitted else "excitement_normalised"
+        detected = self.detector.detect(revenue_mapped, pred_col=pred_col)
 
         # 6. Revenue simulation
         revenue_impact = self.revenue.simulate_season(detected, n_simulations=50)

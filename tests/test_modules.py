@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
+import pytest
 from src.data_loader import CricketDataLoader, PRESSURE_RULES
 from src.pressure_genome import PressureGenome, PressureGenomeConfig
 from src.impact_player import (
@@ -79,7 +80,7 @@ def test_fantasy_data_generation():
         assert 0.05 < churn_rate < 0.60, f"Churn rate {churn_rate} unrealistic"
         print(f"  [PASS] Fantasy data: {len(users)} users, churn rate {churn_rate:.1%}")
     except FileNotFoundError:
-        raise Exception("SKIP: Fantasy user CSV not available — this module requires separate user data")
+        pytest.skip("Fantasy user CSV not available — this module requires separate user data")
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +95,7 @@ def test_pressure_genome_fit():
     assert genome._fitted
     assert genome.kmeans is not None
     assert len(np.unique(genome._cluster_labels)) >= 2
-    print(f"  [PASS] Pressure Genome: {len(df)} batsmen → {len(np.unique(genome._cluster_labels))} clusters")
+    print(f"  [PASS] Pressure Genome: {len(df)} batsmen -> {len(np.unique(genome._cluster_labels))} clusters")
 
 
 def test_pressure_genome_archetypes():
@@ -243,16 +244,24 @@ def test_hot_zone_report():
         assert "error" not in report
         assert "estimated_ad_revenue_cr" in report
         assert "top_5_hot_zones" in report
-        print(f"  [PASS] Hot zone report: rev=₹{report['estimated_ad_revenue_cr']}cr, zones={len(report['top_5_hot_zones'])}")
+        print(f"  [PASS] Hot zone report: rev=Rs.{report['estimated_ad_revenue_cr']}cr, zones={len(report['top_5_hot_zones'])}")
 
 
 # ---------------------------------------------------------------------------
 # Module 4 — Fantasy CLV tests
 # ---------------------------------------------------------------------------
 
+def _require_fantasy_users(loader, n_users=1000):
+    """Load fantasy users or raise SKIP Exception."""
+    try:
+        return loader.get_fantasy_users(n_users=n_users)
+    except FileNotFoundError as e:
+        pytest.skip(str(e))
+
+
 def test_feature_engineering():
     loader = _get_loader()
-    users = loader.get_fantasy_users(n_users=1000)
+    users = _require_fantasy_users(loader, n_users=1000)
     from src.fantasy_clv import FantasyFeatureEngineer
     engineer = FantasyFeatureEngineer()
     processed = engineer.engineer_features(users)
@@ -265,7 +274,7 @@ def test_feature_engineering():
 
 def test_cox_model():
     loader = _get_loader()
-    users = loader.get_fantasy_users(n_users=2000)
+    users = _require_fantasy_users(loader, n_users=2000)
     from src.fantasy_clv import FantasyFeatureEngineer, CoxSurvivalModel
     processed = FantasyFeatureEngineer().engineer_features(users)
     cox = CoxSurvivalModel()
@@ -282,7 +291,7 @@ def test_cox_model():
 
 def test_xgb_model():
     loader = _get_loader()
-    users = loader.get_fantasy_users(n_users=2000)
+    users = _require_fantasy_users(loader, n_users=2000)
     from src.fantasy_clv import FantasyFeatureEngineer, XGBoostChurnModel
     processed = FantasyFeatureEngineer().engineer_features(users)
     xgb = XGBoostChurnModel()
@@ -297,7 +306,7 @@ def test_xgb_model():
 
 def test_clv_model():
     loader = _get_loader()
-    users = loader.get_fantasy_users(n_users=2000)
+    users = _require_fantasy_users(loader, n_users=2000)
     from src.fantasy_clv import FantasyFeatureEngineer, CLVModel
     processed = FantasyFeatureEngineer().engineer_features(users)
     clv = CLVModel()
@@ -305,12 +314,12 @@ def test_clv_model():
     clv_predictions = clv.predict_clv(processed, time_periods=12)
     assert "predicted_clv" in clv_predictions.columns
     assert "predicted_purchases" in clv_predictions.columns
-    print(f"  [PASS] CLV: mean predicted CLV = ₹{clv_predictions['predicted_clv'].mean():.0f}")
+    print(f"  [PASS] CLV: mean predicted CLV = Rs.{clv_predictions['predicted_clv'].mean():.0f}")
 
 
 def test_intervention_engine():
     loader = _get_loader()
-    users = loader.get_fantasy_users(n_users=2000)
+    users = _require_fantasy_users(loader, n_users=2000)
     from src.fantasy_clv import FantasyFeatureEngineer, CLVModel, InterventionEngine
     processed = FantasyFeatureEngineer().engineer_features(users)
     clv = CLVModel()
@@ -325,12 +334,12 @@ def test_intervention_engine():
     impact = engine.simulate_revenue_impact(segmented, platform_user_count=190_000_000)
     assert "per_segment" in impact
     assert "total_recovered_cr_sample" in impact
-    print(f"  [PASS] Intervention: {segmented['segment'].nunique()} segments, recovery=₹{impact['total_recovered_cr_sample']}cr sample")
+    print(f"  [PASS] Intervention: {segmented['segment'].nunique()} segments, recovery=Rs.{impact['total_recovered_cr_sample']}cr sample")
 
 
 def test_full_fantasy_pipeline():
     loader = _get_loader()
-    users = loader.get_fantasy_users(n_users=5000)
+    users = _require_fantasy_users(loader, n_users=5000)
     fc = FantasyChurnCLV(ChurnCLVConfig())
     result = fc.run_pipeline(users)
     assert result["n_users"] == 5000

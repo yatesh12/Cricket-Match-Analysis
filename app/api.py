@@ -26,6 +26,7 @@ from src.pressure_genome import PressureGenome, PressureGenomeConfig
 from src.impact_player import ImpactPlayerAI, ImpactPlayerConfig, MatchState
 from src.broadcast_monetisation import BroadcastMonetisation, BroadcastConfig
 from src.fantasy_clv import FantasyChurnCLV, ChurnCLVConfig
+from src.data_pipeline import DATA_RAW, DATA_PROCESSED, FEATURE_STORE_FILES
 
 # ---------------------------------------------------------------------------
 # App initialization
@@ -102,14 +103,23 @@ class PressureQueryRequest(BaseModel):
 
 @app.get("/")
 def root():
+    available_raw = [p.name for p in DATA_RAW.glob("*.csv")] if DATA_RAW.exists() else []
+    available_processed = {k: p.exists() for k, p in {name: DATA_PROCESSED / fname for name, fname in FEATURE_STORE_FILES.items()}.items()}
     return {
         "service": "CricketIQ API",
         "version": "1.0.0",
+        "data_pipeline": {
+            "raw_sources": available_raw,
+            "feature_store": available_processed,
+            "raw_dir": str(DATA_RAW),
+            "processed_dir": str(DATA_PROCESSED),
+        },
         "endpoints": {
             "POST /recommend-substitution": "Impact Player AI — optimal substitution timing + candidate",
             "POST /churn-score": "Fantasy CLV — user-level churn risk + predicted CLV",
             "GET /pressure-compatibility": "Pressure Genome — rank batsmen for match situation",
             "GET /match-hot-zones": "Broadcast Monetisation — predicted peak engagement windows",
+            "GET /data-pipeline-status": "Unified data pipeline health check",
             "GET /health": "Health check",
         },
     }
@@ -117,6 +127,22 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
+
+@app.get("/data-pipeline-status")
+def data_pipeline_status():
+    """Check the health of the unified data pipeline."""
+    raw_files = {}
+    for f in DATA_RAW.glob("*.csv"):
+        raw_files[f.name] = f.stat().st_size
+    store_files = {}
+    for name, fname in FEATURE_STORE_FILES.items():
+        p = DATA_PROCESSED / fname
+        store_files[name] = {"exists": p.exists(), "size_bytes": p.stat().st_size if p.exists() else 0}
+    return {
+        "raw_sources": raw_files,
+        "feature_store": store_files,
+        "full_pipeline_ready": all(v["exists"] for v in store_files.values()),
+    }
 
 
 @app.post("/recommend-substitution")
